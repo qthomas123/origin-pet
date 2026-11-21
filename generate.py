@@ -50,8 +50,8 @@ android {
         applicationId "com.origin.pet"
         minSdk 26
         targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        versionCode 2
+        versionName "2.0"
     }
 
     buildTypes {
@@ -74,7 +74,18 @@ write("app/src/main/AndroidManifest.xml", r"""<?xml version="1.0" encoding="utf-
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
 
     <application
         android:allowBackup="false"
@@ -90,10 +101,16 @@ write("app/src/main/AndroidManifest.xml", r"""<?xml version="1.0" encoding="utf-
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".PickActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <service
             android:name=".PetService"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
+            android:foregroundServiceType="specialUse|microphone">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="desktop_pet_overlay" />
@@ -109,6 +126,7 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -122,12 +140,22 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.util.ArrayList;
+
 public class MainActivity extends Activity {
 
     private EditText keyBox;
 
     private int dp(int v) {
         return (int) (v * getResources().getDisplayMetrics().density);
+    }
+
+    private Button addButton(LinearLayout root, String text, View.OnClickListener l) {
+        Button b = new Button(this);
+        b.setText(text);
+        b.setOnClickListener(l);
+        root.addView(b);
+        return b;
     }
 
     @Override
@@ -141,12 +169,12 @@ public class MainActivity extends Activity {
         scroll.addView(root);
 
         TextView title = new TextView(this);
-        title.setText("Origin Pet");
+        title.setText("Origin Pet v2");
         title.setTextSize(26);
         root.addView(title);
 
         TextView info = new TextView(this);
-        info.setText("ไอรินจะเดินอยู่บนหน้าจอทุกแอป แตะที่ตัวเธอเพื่อคุยกับ Origin AI ลากเพื่อย้ายตำแหน่ง");
+        info.setText("ไอรินเดินอยู่บนหน้าจอทุกแอป แตะที่ตัวเธอเพื่อคุย ส่งรูป หรือพูดด้วยเสียง ลากเพื่อย้ายตำแหน่ง เธอจำการคุยไว้ได้แม้ปิดเครื่อง");
         info.setPadding(0, dp(8), 0, dp(16));
         root.addView(info);
 
@@ -163,40 +191,59 @@ public class MainActivity extends Activity {
         note.setPadding(0, dp(4), 0, dp(16));
         root.addView(note);
 
-        Button perm = new Button(this);
-        perm.setText("1) อนุญาตแสดงทับแอปอื่น");
-        perm.setOnClickListener(new View.OnClickListener() {
+        addButton(root, "1) อนุญาตแสดงทับแอปอื่น", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 openOverlaySettings();
             }
         });
-        root.addView(perm);
 
-        Button start = new Button(this);
-        start.setText("2) เรียกไอรินออกมา");
-        start.setOnClickListener(new View.OnClickListener() {
+        addButton(root, "2) อนุญาตไมโครโฟน (สำหรับพูดคุย)", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                askPermissions();
+            }
+        });
+
+        addButton(root, "3) เรียกไอรินออกมา", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 startPet();
             }
         });
-        root.addView(start);
 
-        Button stop = new Button(this);
-        stop.setText("เก็บไอรินกลับ");
-        stop.setOnClickListener(new View.OnClickListener() {
+        addButton(root, "เก็บไอรินกลับ", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 stopService(new Intent(MainActivity.this, PetService.class));
             }
         });
-        root.addView(stop);
+
+        addButton(root, "ล้างความจำของไอริน", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                stopService(new Intent(MainActivity.this, PetService.class));
+                getSharedPreferences("pet", Context.MODE_PRIVATE).edit()
+                        .remove("memory").remove("notes").apply();
+                Toast.makeText(MainActivity.this, "ล้างความจำแล้ว กด เรียกไอรินออกมา ใหม่ได้เลย", Toast.LENGTH_LONG).show();
+            }
+        });
 
         setContentView(scroll);
+        askPermissions();
+    }
 
-        if (Build.VERSION.SDK_INT >= 33) {
-            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1);
+    private void askPermissions() {
+        ArrayList<String> need = new ArrayList<String>();
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            need.add(Manifest.permission.POST_NOTIFICATIONS);
+        }
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            need.add(Manifest.permission.RECORD_AUDIO);
+        }
+        if (!need.isEmpty()) {
+            requestPermissions(need.toArray(new String[0]), 1);
         }
     }
 
@@ -216,9 +263,117 @@ public class MainActivity extends Activity {
         SharedPreferences.Editor ed = getSharedPreferences("pet", Context.MODE_PRIVATE).edit();
         ed.putString("key", key);
         ed.apply();
+        stopService(new Intent(this, PetService.class));
         Intent i = new Intent(this, PetService.class);
         startForegroundService(i);
         Toast.makeText(this, "ไอรินออกมาแล้ว", Toast.LENGTH_SHORT).show();
+    }
+}
+""")
+
+write("app/src/main/java/com/origin/pet/PickActivity.java", r"""package com.origin.pet;
+
+import android.app.Activity;
+import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Matrix;
+import android.media.ExifInterface;
+import android.net.Uri;
+import android.os.Bundle;
+import android.util.Base64;
+
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+
+public class PickActivity extends Activity {
+
+    @Override
+    protected void onCreate(Bundle b) {
+        super.onCreate(b);
+        Intent i = new Intent(Intent.ACTION_GET_CONTENT);
+        i.setType("image/*");
+        i.addCategory(Intent.CATEGORY_OPENABLE);
+        try {
+            startActivityForResult(Intent.createChooser(i, "เลือกรูป"), 1);
+        } catch (Exception e) {
+            finish();
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int req, int res, Intent data) {
+        super.onActivityResult(req, res, data);
+        if (res == RESULT_OK && data != null && data.getData() != null) {
+            final Uri uri = data.getData();
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    String b64 = encode(uri);
+                    PetService.deliverImage(b64);
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            finish();
+                        }
+                    });
+                }
+            }).start();
+        } else {
+            finish();
+        }
+    }
+
+    private InputStream open(Uri uri) throws Exception {
+        return getContentResolver().openInputStream(uri);
+    }
+
+    private String encode(Uri uri) {
+        try {
+            BitmapFactory.Options o = new BitmapFactory.Options();
+            o.inJustDecodeBounds = true;
+            InputStream in = open(uri);
+            BitmapFactory.decodeStream(in, null, o);
+            in.close();
+            int max = Math.max(o.outWidth, o.outHeight);
+            int sample = 1;
+            while (max / sample > 1600) {
+                sample *= 2;
+            }
+            BitmapFactory.Options o2 = new BitmapFactory.Options();
+            o2.inSampleSize = sample;
+            in = open(uri);
+            Bitmap bmp = BitmapFactory.decodeStream(in, null, o2);
+            in.close();
+            if (bmp == null) {
+                return null;
+            }
+            int rot = 0;
+            try {
+                in = open(uri);
+                ExifInterface ex = new ExifInterface(in);
+                int ori = ex.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
+                in.close();
+                if (ori == ExifInterface.ORIENTATION_ROTATE_90) {
+                    rot = 90;
+                } else if (ori == ExifInterface.ORIENTATION_ROTATE_180) {
+                    rot = 180;
+                } else if (ori == ExifInterface.ORIENTATION_ROTATE_270) {
+                    rot = 270;
+                }
+            } catch (Exception ignored) {
+            }
+            if (rot != 0) {
+                Matrix m = new Matrix();
+                m.postRotate(rot);
+                bmp = Bitmap.createBitmap(bmp, 0, 0, bmp.getWidth(), bmp.getHeight(), m, true);
+            }
+            ByteArrayOutputStream bos = new ByteArrayOutputStream();
+            bmp.compress(Bitmap.CompressFormat.JPEG, 80, bos);
+            return Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP);
+        } catch (Exception e) {
+            return null;
+        }
     }
 }
 """)
@@ -239,6 +394,7 @@ public class PetView extends View {
     private final RectF r = new RectF();
 
     private boolean walking = true;
+    private boolean talking = false;
     private int dir = 1;
     private float t = 0f;
     private float idle = 0f;
@@ -254,6 +410,10 @@ public class PetView extends View {
 
     public PetView(Context c) {
         super(c);
+    }
+
+    public void setTalking(boolean b) {
+        talking = b;
     }
 
     public void tick(boolean isWalking, int direction) {
@@ -402,11 +562,18 @@ public class PetView extends View {
         dot(c, 79f, 52f + bob, 1.3f);
         dot(c, 76f, 49f + bob, 1.3f);
         dot(c, 60f, 30f + bob, 1.5f);
-        stroke(0xFF8A3A5C, 1.8f);
-        path.reset();
-        path.moveTo(55f, 60f + bob);
-        path.quadTo(60f, 65f + bob, 65f, 60f + bob);
-        c.drawPath(path, p);
+
+        if (talking && (((int) (t + idle)) / 5) % 2 == 0) {
+            fill(0xFF8A3A5C);
+            r.set(55f, 57f + bob, 65f, 66f + bob);
+            c.drawOval(r, p);
+        } else {
+            stroke(0xFF8A3A5C, 1.8f);
+            path.reset();
+            path.moveTo(55f, 60f + bob);
+            path.quadTo(60f, 65f + bob, 65f, 60f + bob);
+            c.drawPath(path, p);
+        }
 
         c.restore();
     }
@@ -415,6 +582,7 @@ public class PetView extends View {
 
 write("app/src/main/java/com/origin/pet/PetService.java", r"""package com.origin.pet;
 
+import android.Manifest;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -422,14 +590,21 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.speech.RecognitionListener;
+import android.speech.RecognizerIntent;
+import android.speech.SpeechRecognizer;
+import android.speech.tts.TextToSpeech;
+import android.speech.tts.UtteranceProgressListener;
 import android.util.DisplayMetrics;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -451,6 +626,8 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Locale;
 import java.util.Random;
 
 public class PetService extends Service {
@@ -461,7 +638,12 @@ public class PetService extends Service {
     };
     private static final String SYSTEM =
             "คุณคือ Origin AI ที่อยู่ในร่างตัวละครชื่อ ไอริน ผู้ช่วยที่ซุกซนแต่ฉลาด ขึ้นตรงต่อ Q (คิว) เพียงผู้เดียว "
-                    + "ตอบเป็นภาษาไทย กระชับ ตรงไปตรงมา อ่านง่ายบนหน้าจอมือถือ (ไม่เกิน 6 ประโยคถ้าไม่ถูกขอให้ยาว)";
+                    + "ตอบเป็นภาษาไทย กระชับ ตรงไปตรงมา อ่านง่ายบนหน้าจอมือถือ ไม่ใช้ตัวหนาหรือสัญลักษณ์มาร์กดาวน์ "
+                    + "(ไม่เกิน 6 ประโยคถ้าไม่ถูกขอให้ยาว) ถ้า Q ส่งรูปมา ให้ดูรูปและตอบตามที่ถาม";
+    private static final String THINK = "ไอริน: ...\n";
+    private static final int MAX_TURNS = 40;
+
+    static PetService instance;
 
     private WindowManager wm;
     private PetView pet;
@@ -470,11 +652,26 @@ public class PetService extends Service {
     private TextView log;
     private ScrollView logScroll;
     private EditText input;
-    private Button sendBtn;
+    private TextView pendImg;
+    private Button micBtn;
+    private Button speakBtn;
 
     private final Handler ui = new Handler(Looper.getMainLooper());
     private final Random rnd = new Random();
     private final JSONArray history = new JSONArray();
+    private final StringBuilder logBuf = new StringBuilder();
+
+    private String notes = "";
+    private String pendingImage = null;
+    private String lastErr = "";
+    private volatile boolean askOk = false;
+
+    private SpeechRecognizer sr;
+    private boolean listening = false;
+    private TextToSpeech tts;
+    private boolean ttsReady = false;
+    private boolean ttsWarned = false;
+    private boolean speakOn = true;
 
     private int screenW;
     private int screenH;
@@ -529,10 +726,37 @@ public class PetService extends Service {
         return null;
     }
 
+    static void deliverImage(final String b64) {
+        final PetService s = instance;
+        if (s != null) {
+            s.ui.post(new Runnable() {
+                @Override
+                public void run() {
+                    s.onImage(b64);
+                }
+            });
+        }
+    }
+
+    private void onImage(String b64) {
+        if (b64 == null) {
+            append("\n(โหลดรูปไม่สำเร็จ ลองรูปอื่นนะคะ)\n");
+            return;
+        }
+        pendingImage = b64;
+        if (pendImg != null) {
+            pendImg.setVisibility(View.VISIBLE);
+        }
+    }
+
     @Override
     public void onCreate() {
         super.onCreate();
+        instance = this;
         startAsForeground();
+        loadMemory();
+        buildLogFromHistory();
+        initTts();
 
         wm = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
         DisplayMetrics dm = getResources().getDisplayMetrics();
@@ -607,7 +831,11 @@ public class PetService extends Service {
                 .setOngoing(true)
                 .build();
         if (Build.VERSION.SDK_INT >= 34) {
-            startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+            int type = ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE;
+            if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
+                type |= ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE;
+            }
+            startForeground(1, n, type);
         } else {
             startForeground(1, n);
         }
@@ -616,6 +844,271 @@ public class PetService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         return START_STICKY;
+    }
+
+    // ---------------- ความจำ ----------------
+
+    private void loadMemory() {
+        SharedPreferences sp = getSharedPreferences("pet", Context.MODE_PRIVATE);
+        notes = sp.getString("notes", "");
+        speakOn = sp.getBoolean("speak", true);
+        try {
+            JSONArray a = new JSONArray(sp.getString("memory", "[]"));
+            for (int i = 0; i < a.length(); i++) {
+                history.put(a.getJSONObject(i));
+            }
+            while (history.length() > 0
+                    && !"user".equals(history.getJSONObject(0).optString("role"))) {
+                history.remove(0);
+            }
+            if (history.length() > 0
+                    && "user".equals(history.getJSONObject(history.length() - 1).optString("role"))) {
+                history.remove(history.length() - 1);
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void saveMemory() {
+        getSharedPreferences("pet", Context.MODE_PRIVATE).edit()
+                .putString("memory", history.toString())
+                .putString("notes", notes)
+                .apply();
+    }
+
+    private String textOf(JSONObject o) {
+        try {
+            return o.getJSONArray("parts").getJSONObject(0).optString("text", "");
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private void buildLogFromHistory() {
+        logBuf.setLength(0);
+        int start = Math.max(0, history.length() - 8);
+        if (history.length() > 0) {
+            logBuf.append("(ไอรินจำการคุยครั้งก่อนได้ค่ะ)\n");
+        }
+        for (int i = start; i < history.length(); i++) {
+            try {
+                JSONObject o = history.getJSONObject(i);
+                logBuf.append("user".equals(o.optString("role")) ? "\nQ: " : "ไอริน: ")
+                        .append(textOf(o)).append("\n");
+            } catch (Exception ignored) {
+            }
+        }
+        if (history.length() == 0) {
+            logBuf.append("ไอริน: สวัสดีค่ะ Q มีอะไรให้ช่วยไหมคะ\n");
+        }
+    }
+
+    private JSONObject item(String role, String text) throws Exception {
+        return new JSONObject().put("role", role)
+                .put("parts", new JSONArray().put(new JSONObject().put("text", text)));
+    }
+
+    private void summarizeIfNeeded(String key) {
+        if (history.length() <= MAX_TURNS) {
+            return;
+        }
+        int n = 20;
+        try {
+            StringBuilder tr = new StringBuilder();
+            for (int i = 0; i < n; i++) {
+                JSONObject o = history.getJSONObject(i);
+                tr.append("user".equals(o.optString("role")) ? "Q: " : "ไอริน: ")
+                        .append(textOf(o)).append('\n');
+            }
+            String prompt = "ความจำเดิมเกี่ยวกับ Q:\n" + (notes.isEmpty() ? "(ยังไม่มี)" : notes)
+                    + "\n\nบทสนทนาเก่าที่กำลังจะถูกลบ:\n" + tr
+                    + "\nจงสรุปรวมเป็นโน้ตความจำใหม่ไม่เกิน 15 บรรทัด เก็บเฉพาะข้อเท็จจริงสำคัญเกี่ยวกับ Q "
+                    + "ความชอบ เรื่องที่กำลังทำ และสิ่งที่ตกลงกันไว้ ตอบเฉพาะตัวโน้ต";
+            JSONObject body = new JSONObject();
+            body.put("contents", new JSONArray().put(item("user", prompt)));
+            String out = postGemini(getSharedPreferences("pet", Context.MODE_PRIVATE).getString("key", ""), body);
+            if (out != null && !out.trim().isEmpty()) {
+                notes = out.trim();
+            } else if (history.length() <= MAX_TURNS * 2) {
+                return;
+            }
+            JSONArray rest = new JSONArray();
+            for (int i = n; i < history.length(); i++) {
+                rest.put(history.get(i));
+            }
+            while (history.length() > 0) {
+                history.remove(0);
+            }
+            for (int i = 0; i < rest.length(); i++) {
+                history.put(rest.get(i));
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    // ---------------- เสียง ----------------
+
+    private void initTts() {
+        tts = new TextToSpeech(this, new TextToSpeech.OnInitListener() {
+            @Override
+            public void onInit(int status) {
+                if (status == TextToSpeech.SUCCESS && tts != null) {
+                    int r = tts.setLanguage(new Locale("th", "TH"));
+                    ttsReady = r != TextToSpeech.LANG_MISSING_DATA && r != TextToSpeech.LANG_NOT_SUPPORTED;
+                    tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                        @Override
+                        public void onStart(String id) {
+                            setTalking(true);
+                        }
+
+                        @Override
+                        public void onDone(String id) {
+                            setTalking(false);
+                        }
+
+                        @Override
+                        public void onError(String id) {
+                            setTalking(false);
+                        }
+                    });
+                }
+            }
+        });
+    }
+
+    private void setTalking(final boolean b) {
+        ui.post(new Runnable() {
+            @Override
+            public void run() {
+                if (pet != null) {
+                    pet.setTalking(b);
+                }
+            }
+        });
+    }
+
+    private void speak(String text) {
+        if (!speakOn) {
+            return;
+        }
+        if (!ttsReady || tts == null) {
+            if (!ttsWarned) {
+                ttsWarned = true;
+                append("(เครื่องยังไม่มีเสียงอ่านภาษาไทย ติดตั้งได้ที่ ตั้งค่า > การจัดการทั่วไป > ภาษา > แปลงข้อความเป็นเสียง)\n");
+            }
+            return;
+        }
+        String clean = text.replaceAll("[*#`_>]", "");
+        if (clean.length() > 1500) {
+            clean = clean.substring(0, 1500);
+        }
+        tts.speak(clean, TextToSpeech.QUEUE_FLUSH, null, "irin");
+    }
+
+    private void toggleMic() {
+        if (listening) {
+            if (sr != null) {
+                sr.stopListening();
+            }
+            return;
+        }
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            append("\n(ยังไม่ได้อนุญาตไมโครโฟน เปิดแอป Origin Pet แล้วกด อนุญาตไมโครโฟน)\n");
+            return;
+        }
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            append("\n(เครื่องนี้ไม่มีบริการรู้จำเสียง ต้องมีแอป Google)\n");
+            return;
+        }
+        if (tts != null) {
+            tts.stop();
+        }
+        if (sr == null) {
+            sr = SpeechRecognizer.createSpeechRecognizer(this);
+            sr.setRecognitionListener(new RecognitionListener() {
+                @Override
+                public void onReadyForSpeech(Bundle params) {
+                    setMicText("ฟังอยู่...");
+                }
+
+                @Override
+                public void onBeginningOfSpeech() {
+                }
+
+                @Override
+                public void onRmsChanged(float rmsdB) {
+                }
+
+                @Override
+                public void onBufferReceived(byte[] buffer) {
+                }
+
+                @Override
+                public void onEndOfSpeech() {
+                }
+
+                @Override
+                public void onError(int error) {
+                    listening = false;
+                    setMicText("ไมค์");
+                    if (error != SpeechRecognizer.ERROR_NO_MATCH
+                            && error != SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+                        append("\n(ไมค์ใช้ไม่ได้ รหัส " + error + ")\n");
+                    }
+                }
+
+                @Override
+                public void onResults(Bundle results) {
+                    listening = false;
+                    setMicText("ไมค์");
+                    ArrayList<String> r = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                    if (r != null && !r.isEmpty()) {
+                        doSend(r.get(0));
+                    }
+                }
+
+                @Override
+                public void onPartialResults(Bundle partial) {
+                    ArrayList<String> r = partial.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                    if (r != null && !r.isEmpty() && input != null) {
+                        input.setText(r.get(0));
+                    }
+                }
+
+                @Override
+                public void onEvent(int eventType, Bundle params) {
+                }
+            });
+        }
+        Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "th-TH");
+        i.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+        listening = true;
+        setMicText("ฟังอยู่...");
+        sr.startListening(i);
+    }
+
+    private void setMicText(String s) {
+        if (micBtn != null) {
+            micBtn.setText(s);
+        }
+    }
+
+    // ---------------- หน้าต่างแชท ----------------
+
+    private Button smallBtn(String text, View.OnClickListener l) {
+        Button b = new Button(this);
+        b.setText(text);
+        b.setTextSize(12);
+        b.setAllCaps(false);
+        b.setMinWidth(0);
+        b.setMinimumWidth(0);
+        b.setMinHeight(0);
+        b.setMinimumHeight(0);
+        b.setPadding(dp(10), dp(8), dp(10), dp(8));
+        b.setOnClickListener(l);
+        return b;
     }
 
     private void toggleChat() {
@@ -638,44 +1131,82 @@ public class PetService extends Service {
         title.setText("ไอริน x Origin AI");
         title.setTextColor(Color.parseColor("#3A2F7A"));
         title.setTextSize(16);
-        LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
-        head.addView(title, tl);
-        Button close = new Button(this);
-        close.setText("X");
-        close.setOnClickListener(new View.OnClickListener() {
+        head.addView(title, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        speakBtn = smallBtn(speakOn ? "เสียง: เปิด" : "เสียง: ปิด", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                speakOn = !speakOn;
+                getSharedPreferences("pet", Context.MODE_PRIVATE).edit().putBoolean("speak", speakOn).apply();
+                speakBtn.setText(speakOn ? "เสียง: เปิด" : "เสียง: ปิด");
+                if (!speakOn && tts != null) {
+                    tts.stop();
+                    setTalking(false);
+                }
+            }
+        });
+        head.addView(speakBtn);
+        head.addView(smallBtn("X", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
                 closeChat();
             }
-        });
-        head.addView(close);
+        }));
         box.addView(head);
 
         log = new TextView(this);
         log.setTextColor(Color.parseColor("#222222"));
         log.setTextSize(15);
         log.setPadding(dp(4), dp(4), dp(4), dp(4));
-        log.setText("ไอริน: สวัสดีค่ะ Q มีอะไรให้ช่วยไหมคะ\n");
+        log.setText(logBuf.toString());
         logScroll = new ScrollView(this);
         logScroll.addView(log);
         box.addView(logScroll, new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(220)));
+        scrollDown();
+
+        pendImg = new TextView(this);
+        pendImg.setText("แนบรูปแล้ว 1 รูป (แตะเพื่อยกเลิก)");
+        pendImg.setTextColor(Color.parseColor("#8E5CF0"));
+        pendImg.setTextSize(13);
+        pendImg.setVisibility(pendingImage != null ? View.VISIBLE : View.GONE);
+        pendImg.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                pendingImage = null;
+                pendImg.setVisibility(View.GONE);
+            }
+        });
+        box.addView(pendImg);
 
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
+        row.addView(smallBtn("รูป", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                Intent i = new Intent(PetService.this, PickActivity.class);
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(i);
+            }
+        }));
+        micBtn = smallBtn("ไมค์", new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                toggleMic();
+            }
+        });
+        row.addView(micBtn);
         input = new EditText(this);
         input.setHint("พิมพ์ข้อความ...");
         input.setMaxLines(3);
         row.addView(input, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
-        sendBtn = new Button(this);
-        sendBtn.setText("ส่ง");
-        sendBtn.setOnClickListener(new View.OnClickListener() {
+        row.addView(smallBtn("ส่ง", new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                sendMessage();
+                if (input != null) {
+                    doSend(input.getText().toString().trim());
+                }
             }
-        });
-        row.addView(sendBtn);
+        }));
         box.addView(row);
 
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
@@ -692,6 +1223,10 @@ public class PetService extends Service {
     }
 
     private void closeChat() {
+        if (listening && sr != null) {
+            sr.cancel();
+            listening = false;
+        }
         if (chat != null) {
             try {
                 wm.removeView(chat);
@@ -699,13 +1234,18 @@ public class PetService extends Service {
             }
             chat = null;
         }
+        log = null;
+        logScroll = null;
+        input = null;
+        pendImg = null;
+        micBtn = null;
+        speakBtn = null;
     }
 
-    private void append(String s) {
-        if (log == null) {
+    private void scrollDown() {
+        if (logScroll == null) {
             return;
         }
-        log.append(s);
         logScroll.post(new Runnable() {
             @Override
             public void run() {
@@ -716,115 +1256,189 @@ public class PetService extends Service {
         });
     }
 
-    private void sendMessage() {
+    private void append(String s) {
+        logBuf.append(s);
+        if (log != null) {
+            log.setText(logBuf.toString());
+            scrollDown();
+        }
+    }
+
+    private void showReply(String reply) {
+        int idx = logBuf.lastIndexOf(THINK);
+        if (idx >= 0) {
+            logBuf.delete(idx, idx + THINK.length());
+        }
+        append("ไอริน: " + reply + "\n");
+    }
+
+    // ---------------- ส่งข้อความ ----------------
+
+    private void doSend(String typed) {
         if (busy) {
             return;
         }
-        final String text = input.getText().toString().trim();
-        if (text.isEmpty()) {
+        final String img = pendingImage;
+        String t = typed == null ? "" : typed.trim();
+        if (t.isEmpty() && img == null) {
             return;
         }
+        if (t.isEmpty()) {
+            t = "ช่วยดูรูปนี้หน่อยค่ะ";
+        }
+        final String text = t;
         SharedPreferences sp = getSharedPreferences("pet", Context.MODE_PRIVATE);
         final String key = sp.getString("key", "");
         if (key.isEmpty()) {
             append("\n(ยังไม่ได้ใส่ API key ในแอป Origin Pet)\n");
             return;
         }
-        input.setText("");
-        append("\nQ: " + text + "\n");
-        append("ไอริน: ...\n");
-        busy = true;
-        try {
-            history.put(new JSONObject().put("role", "user")
-                    .put("parts", new JSONArray().put(new JSONObject().put("text", text))));
-        } catch (Exception ignored) {
+        if (tts != null) {
+            tts.stop();
         }
+        setTalking(false);
+        if (input != null) {
+            input.setText("");
+        }
+        pendingImage = null;
+        if (pendImg != null) {
+            pendImg.setVisibility(View.GONE);
+        }
+        append("\nQ: " + text + (img != null ? " [แนบรูป]" : "") + "\n");
+        append(THINK);
+        busy = true;
+        final int idxUser;
+        try {
+            JSONObject userItem = item("user", text);
+            if (img != null) {
+                userItem.getJSONArray("parts").put(new JSONObject().put("inline_data",
+                        new JSONObject().put("mime_type", "image/jpeg").put("data", img)));
+            }
+            history.put(userItem);
+        } catch (Exception e) {
+            busy = false;
+            showReply("ขอโทษค่ะ ส่งไม่สำเร็จ");
+            return;
+        }
+        idxUser = history.length() - 1;
         new Thread(new Runnable() {
             @Override
             public void run() {
                 final String reply = askGemini(key);
+                final boolean ok = askOk;
+                if (ok) {
+                    try {
+                        history.put(idxUser, item("user", text + (img != null ? " [ส่งรูปภาพมาด้วย]" : "")));
+                    } catch (Exception ignored) {
+                    }
+                }
+                ui.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        showReply(reply);
+                        if (ok) {
+                            speak(reply);
+                        }
+                    }
+                });
+                if (ok) {
+                    summarizeIfNeeded(key);
+                    saveMemory();
+                }
                 ui.post(new Runnable() {
                     @Override
                     public void run() {
                         busy = false;
-                        if (log != null) {
-                            CharSequence all = log.getText();
-                            String s = all.toString();
-                            int idx = s.lastIndexOf("ไอริน: ...\n");
-                            if (idx >= 0) {
-                                log.setText(s.substring(0, idx));
-                            }
-                        }
-                        append("ไอริน: " + reply + "\n");
                     }
                 });
             }
         }).start();
     }
 
+    private String systemText() {
+        if (notes.isEmpty()) {
+            return SYSTEM;
+        }
+        return SYSTEM + "\n\nความจำเกี่ยวกับ Q จากการคุยครั้งก่อน:\n" + notes;
+    }
+
     private String askGemini(String key) {
-        String lastErr = "ไม่ทราบสาเหตุ";
         try {
             JSONObject body = new JSONObject();
             body.put("system_instruction", new JSONObject()
-                    .put("parts", new JSONArray().put(new JSONObject().put("text", SYSTEM))));
+                    .put("parts", new JSONArray().put(new JSONObject().put("text", systemText()))));
             body.put("contents", history);
-            byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
-
-            for (String model : MODELS) {
-                for (int attempt = 0; attempt < 2; attempt++) {
-                    HttpURLConnection con = null;
-                    try {
-                        URL url = new URL("https://generativelanguage.googleapis.com/v1beta/models/"
-                                + model + ":generateContent");
-                        con = (HttpURLConnection) url.openConnection();
-                        con.setConnectTimeout(15000);
-                        con.setReadTimeout(25000);
-                        con.setRequestMethod("POST");
-                        con.setDoOutput(true);
-                        con.setRequestProperty("Content-Type", "application/json");
-                        con.setRequestProperty("x-goog-api-key", key);
-                        OutputStream os = con.getOutputStream();
-                        os.write(payload);
-                        os.close();
-
-                        int code = con.getResponseCode();
-                        if (code == 200) {
-                            String res = readAll(con.getInputStream());
-                            JSONObject j = new JSONObject(res);
-                            String out = j.getJSONArray("candidates").getJSONObject(0)
-                                    .getJSONObject("content").getJSONArray("parts")
-                                    .getJSONObject(0).getString("text");
-                            history.put(new JSONObject().put("role", "model")
-                                    .put("parts", new JSONArray().put(new JSONObject().put("text", out))));
-                            return out.trim();
-                        }
-                        String err = readAll(con.getErrorStream());
-                        lastErr = model + " HTTP " + code;
-                        if (code == 429 || code == 500 || code == 503) {
-                            Thread.sleep(800);
-                            continue;
-                        }
-                        if (code == 400 || code == 403) {
-                            lastErr += " (เช็กว่า API key ถูกต้อง) " + (err.length() > 120 ? err.substring(0, 120) : err);
-                        }
-                        break;
-                    } catch (Exception e) {
-                        lastErr = model + ": " + e.getMessage();
-                    } finally {
-                        if (con != null) {
-                            con.disconnect();
-                        }
-                    }
-                }
+            String out = postGemini(key, body);
+            if (out != null) {
+                history.put(item("model", out));
+                askOk = true;
+                return out.trim();
             }
         } catch (Exception e) {
-            lastErr = e.getMessage();
+            lastErr = String.valueOf(e.getMessage());
         }
         if (history.length() > 0) {
             history.remove(history.length() - 1);
         }
+        askOk = false;
         return "ขอโทษค่ะ ติดต่อโมเดลไม่ได้ (" + lastErr + ")";
+    }
+
+    private String postGemini(String key, JSONObject body) {
+        lastErr = "ไม่ทราบสาเหตุ";
+        byte[] payload = body.toString().getBytes(StandardCharsets.UTF_8);
+        for (String model : MODELS) {
+            for (int attempt = 0; attempt < 2; attempt++) {
+                HttpURLConnection con = null;
+                try {
+                    URL url = new URL("https://generativelanguage.googleapis.com/v1beta/models/"
+                            + model + ":generateContent");
+                    con = (HttpURLConnection) url.openConnection();
+                    con.setConnectTimeout(15000);
+                    con.setReadTimeout(40000);
+                    con.setRequestMethod("POST");
+                    con.setDoOutput(true);
+                    con.setRequestProperty("Content-Type", "application/json");
+                    con.setRequestProperty("x-goog-api-key", key);
+                    OutputStream os = con.getOutputStream();
+                    os.write(payload);
+                    os.close();
+
+                    int code = con.getResponseCode();
+                    if (code == 200) {
+                        JSONObject j = new JSONObject(readAll(con.getInputStream()));
+                        JSONArray parts = j.getJSONArray("candidates").getJSONObject(0)
+                                .getJSONObject("content").getJSONArray("parts");
+                        StringBuilder sb = new StringBuilder();
+                        for (int i = 0; i < parts.length(); i++) {
+                            sb.append(parts.getJSONObject(i).optString("text", ""));
+                        }
+                        if (sb.length() > 0) {
+                            return sb.toString();
+                        }
+                        lastErr = model + " ไม่มีคำตอบ";
+                        break;
+                    }
+                    String err = readAll(con.getErrorStream());
+                    lastErr = model + " HTTP " + code;
+                    if (code == 429 || code == 500 || code == 503) {
+                        Thread.sleep(800);
+                        continue;
+                    }
+                    if (code == 400 || code == 403) {
+                        lastErr += " (เช็กว่า API key ถูกต้อง) " + (err.length() > 120 ? err.substring(0, 120) : err);
+                    }
+                    break;
+                } catch (Exception e) {
+                    lastErr = model + ": " + e.getMessage();
+                } finally {
+                    if (con != null) {
+                        con.disconnect();
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     private String readAll(InputStream in) throws Exception {
@@ -843,8 +1457,18 @@ public class PetService extends Service {
 
     @Override
     public void onDestroy() {
+        instance = null;
         ui.removeCallbacksAndMessages(null);
         closeChat();
+        if (sr != null) {
+            sr.destroy();
+            sr = null;
+        }
+        if (tts != null) {
+            tts.stop();
+            tts.shutdown();
+            tts = null;
+        }
         if (pet != null) {
             try {
                 wm.removeView(pet);
