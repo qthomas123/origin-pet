@@ -1,13 +1,14 @@
-name: Build APK
+name: Build Origin Pet APK
 
 on:
-  workflow_dispatch:
   push:
     branches: [ "main" ]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -15,21 +16,35 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
-      - name: Install Buildozer dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y git zip unzip openjdk-17-jdk python3-pip python3-setuptools autoconf libtool pkg-config zlib1g-dev libncurses-dev cmake libffi-dev libssl-dev
-          pip install --upgrade pip wheel setuptools
-          pip install cython==0.29.36 buildozer
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
 
-      - name: Build APK with Buildozer
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Generate Android project
+        run: python build_app_project.py
+
+      - name: Enable AndroidX in gradle.properties
         run: |
-          buildozer android debug
+          if [ -f app-project/gradle.properties ]; then
+            sed -i 's/android.useAndroidX=false/android.useAndroidX=true/g' app-project/gradle.properties
+          fi
+
+      - name: Build Debug APK
+        working-directory: app-project
+        run: gradle assembleDebug --stacktrace
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: origin-pet-apk
-          path: bin/*.apk
+          path: app-project/app/build/outputs/apk/debug/*.apk
