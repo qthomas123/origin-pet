@@ -20,7 +20,7 @@ jobs:
           gradle-version: '8.9'
 
       - name: Generate project
-        run: python3 generate.py
+        run: python3 generate.py && python3 patch3.py && python3 patch3b.py
 
       - name: Accept Android licenses
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
