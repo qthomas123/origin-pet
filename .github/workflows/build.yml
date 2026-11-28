@@ -20,7 +20,7 @@ jobs:
           gradle-version: '8.9'
 
       - name: Generate project
-        run: python3 generate.py && python3 patch3.py && python3 patch3b.py && python3 patch4.py && python3 patch5.py && python3 patch6.py && python3 patch7.py && python3 patch8.py && python3 patch9.py && python3 patch9b.py && python3 patch10.py && python3 patch11.py && python3 patch12.py && python3 patch13.py && python3 patch14.py && python3 patch15.py
+        run: python3 generate.py && python3 patch3.py && python3 patch3b.py && python3 patch4.py && python3 patch5.py && python3 patch6.py && python3 patch7.py && python3 patch8.py && python3 patch9.py && python3 patch9b.py && python3 patch10.py && python3 patch11.py && python3 patch12.py && python3 patch13.py && python3 patch14.py && python3 patch15.py && python3 patch16.py
 
       - name: Accept Android licenses
         run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
